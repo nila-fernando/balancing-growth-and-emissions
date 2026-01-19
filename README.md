@@ -31,6 +31,6 @@ Ensure the following are installed:
 
 ---
 
-## ⚖️ License
+## License
 
 This repository is provided for academic purposes.
