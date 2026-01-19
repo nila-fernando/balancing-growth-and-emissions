@@ -1,0 +1,294 @@
+---
+title: "Balancing Growth and Emissions: Lessons from Global CO₂ Reduction Successes for Australian Policy"
+author: "SID 541015907"
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: true
+---
+
+# Client Bio
+
+![ADCCEEW Logo](aussiegov.png)
+
+[The Australian Department of Climate Change, Energy, the Environment and Water](https://www.dcceew.gov.au) develops national policies to reduce emissions and support Australia’s transition to a low-carbon economy. It leads efforts to address climate change while protecting the nation’s unique environment, biodiversity, water resources, and cultural heritage.
+
+# Recommendation
+
+The analysis shows economic growth can align with lower emissions and identifies coal as the primary driver of Australia’s carbon footprint. The ADCCEEW should support a shift to a low-emissions economy— for example, by introducing carbon pricing to drive cleaner practices, upgrading coal plant efficiency, and expanding clean energy industries to diversify supply.
+
+
+# Evidence
+
+## IDA
+
+```{r ida, warning = FALSE, message = FALSE, chunk_title = "IDA", results='hide'}
+
+# IDA :D
+
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(maps)
+library(plotly)
+
+data <- read.csv("owid-co2-data.csv")
+
+# Overview of the dataset
+str(data)
+
+# Display first few rows
+head(data)
+
+# Removing rows with missing values
+data_clean <- na.omit(data)
+
+# Removing "World" row
+data_clean <- data_clean %>%
+  filter(country != "World")
+
+# Keep only most prosperous countries based on CO2 emissions per GDP
+data_clean_filtered <- data_clean %>%
+  filter(country %in% c("Switzerland", "Sweden", "United Kingdom", "Denmark", "France", "Australia"))
+
+```
+
+This dataset from [Our World in Data](https://ourworldindata.org/co2-and-other-greenhouse-gas-emissions) covers carbon dioxide (CO~2~) emissions and related economic metrics globally. A subset of countries (Switzerland, Sweden, UK, Denmark, France) was chosen for their low CO~2~ per GDP. This selection is supported by the dataset (as illustrated below) and external research ([GreenMatch, 2024](https://www.greenmatch.co.uk/blog/greenest-countries)). Despite differences in size and resources, these nations will provide valuable insights.
+
+```{r map, warning = FALSE, message = FALSE, results = 'axis'}
+
+# --- Figuring out which countries to focus on ---
+# Load map data
+world_map <- map_data("world")
+
+# Prepare CO2 per GDP data for the year 2022
+co2_map_data <- data_clean %>%
+  filter(year == 2022) %>%
+  select(country, co2_per_gdp) %>%
+  mutate(country = case_when(
+    country == "United States" ~ "USA",
+    country == "United Kingdom" ~ "UK",
+    country == "Czechia" ~ "Czech Republic",
+    TRUE ~ country  # else: keep original name
+  ))
+
+# Join map and CO₂ daat
+map_df <- world_map %>%
+  left_join(co2_map_data, by = c("region" = "country"))
+
+# Plot
+p <- ggplot(map_df, aes(long, lat, group = group, fill = co2_per_gdp, text = paste(region, ": ", round(co2_per_gdp, 3)))) +
+  geom_polygon(color = "white") +
+  scale_fill_gradient(
+    low = "darkgreen", high = "red", na.value = "grey90",
+    name = "CO<sub>2</sub> per GDP"
+  ) +
+  labs(title = "CO<sub>2</sub> Emissions per GDP (2022)") +
+  theme_minimal()
+
+# Convert to interactive Plotly plot
+ggplotly(p, tooltip = "text")
+
+```
+
+## Report
+
+
+```{r gdpvco2, warning = FALSE, message = FALSE}
+
+library(ggrepel)
+library(scales)
+
+# Filter GDP and CO2 data for years 2000 and 2022
+gdp_co2_data <- data_clean_filtered %>%
+  filter(year %in% c(2000, 2022)) %>%
+  select(country, year, gdp, co2)
+
+slope_data <- gdp_co2_data %>%
+  # Each row is one country
+  pivot_wider(names_from = year, values_from = c(gdp, co2)) %>%
+  mutate(co2_diff = co2_2022 - co2_2000) %>%
+  # One row per country-year pair
+  pivot_longer(cols = starts_with("gdp_"), names_to = "year", values_to = "gdp") %>%
+  mutate(year = gsub("gdp_", "", year),
+         year = as.integer(year)) %>%
+  select(country, year, gdp, co2_diff)
+
+# Plot
+ggplot(slope_data, aes(x = factor(year), y = gdp / 1e9, group = country)) +
+  geom_line(aes(color = co2_diff), linewidth = 1.2) +
+  geom_point(aes(color = co2_diff), size = 3) +
+  geom_text_repel(data = slope_data %>% filter(year == 2022), aes(label = country), nudge_x = 0.4) +
+  scale_color_gradient2(
+    low = "darkgreen", mid = "grey80", high = "red", midpoint = 0,
+    name = expression("CO"[2]*" Change (2000–2022)")
+  ) +
+  scale_y_continuous(labels = label_number(suffix = "B"), limits = c(0, 3000)) +
+  labs(
+    title = expression("GDP Change Between 2000 & 2022 with CO"[2]*" Trends"),
+    x = "Year", y = "GDP (Int$)",
+    caption = expression("Green = CO"[2]*" reduction, Red = CO"[2]*" increase")
+  ) +
+  theme_minimal()
+
+```
+
+Outliers like economic downturns are assumed to impact all the countries to a similar extent.
+
+The UK and France clearly demonstrate that **economic growth can be decoupled from carbon emissions**. Both saw their GDP rise and CO~2~ output fall. Denmark, Sweden, and Switzerland too achieved this (albeit to a smaller extent).
+
+In contrast, Australia is the only country to increase CO2 emissions while nearly doubling GDP, reflecting continued reliance on carbon-intensive energy ([CSIRO, 2024](https://www.csiro.au/en/research/environmental-impacts/climate-change/climate-change-qa/sources-of-co2)).
+
+
+```{r pie, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(gganimate)
+
+# Prepare long-format data
+emissions_long <- data_clean_filtered %>%
+  select(country, year, co2, flaring_co2, gas_co2, cement_co2, coal_co2, oil_co2, other_industry_co2) %>%
+  pivot_longer(cols = -c(country, year, co2), names_to = "emission_type", values_to = "co2_value") %>%
+  group_by(country, year) %>%
+  mutate(proportion = co2_value / co2) %>%
+  ungroup()
+
+# Create pie charts (1 per country per year)
+p <- ggplot(emissions_long, aes(x = "", y = proportion, fill = emission_type)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  coord_polar(theta = "y") +
+  facet_wrap(~country) +
+  labs(
+    title = "CO2 Emission Type Proportions by Country",
+    subtitle = "Year: {frame_time}",
+    fill = "Emission Type"
+  ) +
+  theme_void() +
+  transition_time(year)
+
+# Animate
+animate(p, renderer = gifski_renderer())
+
+```
+
+The above emissions categories are assumed to capture all major sources.
+
+Coal remains central to Australia’s economy, dominating emissions. It is the largest source of electricity generation and the second-largest export earner. ([Whitehaven Coal, 2019](https://whitehavencoal.com.au/wp-content/uploads/2019/07/coal-hard-facts-minerals-council-australia.pdf))
+
+In contrast, other developed countries have diversified their energy systems, with oil as the primary emissions source. **Coal is more carbon-intensive than oil or gas** ([ClientEarth, 2025](https://www.clientearth.org/latest/news/fossil-fuels-and-climate-change-the-facts/)). 
+
+Switzerland stands out with near-zero coal use due to hydro-powered electricity  ([Climate Action Tracker, 2024](https://climateactiontracker.org/countries/switzerland/policies-action/)). The UK too has phased out coal in power generation ([Ember, 2025](https://ember-energy.org/app/uploads/2025/02/Clean-Power-2030-builds-stability-by-cutting-import-reliance.pdf)). 
+
+
+::: panel-tabset
+
+### CO~2~ Emissions per unit Energy
+
+```{r}
+# Line plot
+p <- ggplot(data_clean_filtered, aes(x = year, y = co2_per_unit_energy, color = country)) +
+   geom_line() +
+   theme_minimal() +
+   labs(title = "CO<sub>2</sub> Emissions per unit Energy Over Time by Country",
+     x = "Year", 
+     y = "CO<sub>2</sub> Emissions per Unit Energy")
+
+ggplotly(p)
+
+```
+
+Australia’s CO~2~ emissions per unit of energy remains above peers (dropping just 13.8%). This reflects a slower shift to cleaner energy sources.
+
+Denmark, once similar, cut intensity by 45.6% through wind and coal phase-out ([IEA, 2023](https://www.iea.org/reports/denmark-2023/executive-summary)). Sweden consistently had the lowest emissions intensity, with 70% renewable energy in 2024 ([Nowtricity, 2024](https://www.nowtricity.com/country/sweden/)).
+
+
+### CO~2~ Emissions per Capita
+
+```{r}
+# Line plot
+p <- ggplot(data_clean_filtered, aes(x = year, y = co2_per_capita, color = country)) +
+   geom_line() +
+   theme_minimal() +
+   labs(title = "CO<sub>2</sub> Emissions per Capita Over Time by Country", 
+     x = "Year", 
+     y = "CO<sub>2</sub> Emissions per Capital")
+
+ggplotly(p)
+
+```
+
+Australia also has the **highest per capita emissions**, peaking at ~19 tons (2004–2008), down to 14.6 tons by 2022. This shows a **high individual carbon footprint**.
+
+All countries show a **downward trend** since 2007, signaling global progress and growing environmental awareness.
+
+:::
+
+## Limitations
+
+-   Recent emission drops may reflect temporary COVID-19 effects, not structural change.
+-   Imported emissions are excluded from this analysis, potentially understating true footprints.
+-   GDP-adjusted values rely on potentially inaccurate PPP estimates.
+
+
+# Ethics Statement
+
+This project upholds the Shared Value of **truthfulness** by accurately presenting findings about the emissions & GDP data and acknowledging its limitations. It also adheres to the Ethical Principle of **avoiding preempted outcomes** by allowing the data to guide conclusions, rather than shaping findings to meet expectations or desired narratives.
+
+# AI usage statement
+
+ChatGPT (4-o) was accessed on 07-05-2025 via <https://chatgpt.com/share/681a25a3-56fc-8011-bba0-3020c2743357>
+
+AI was used to:
+
+-   Suggest using `ggrepel` to fix overlapping labels in an R plot
+-   Guide the creation of pie charts and slope charts in R
+-   Identify issues with conflicting region names in map plotting, prompting appropriate data modification using mutate
+
+AI was not used to:
+
+-   Insert citations
+-   Conduct research
+
+# Acknowledgements
+
+## References
+
+ClientEarth. (2025, March 27). Fossil Fuels and Climate Change: The Facts. Client Earth. https://www.clientearth.org/latest/news/fossil-fuels-and-climate-change-the-facts/
+
+Climate Action Tracker. (2024). Switzerland: Policies & action. Climateactiontracker.org. https://climateactiontracker.org/countries/switzerland/policies-action/
+
+CSIRO. (2024, April 15). What Are the Sources of Carbon Dioxide in the atmosphere? CSIRO. https://www.csiro.au/en/research/environmental-impacts/climate-change/Climate-change-QA/Sources-of-CO2
+
+IEA. (2023). Executive summary – Denmark 2023 – Analysis. IEA. https://www.iea.org/reports/denmark-2023/executive-summary
+
+Marshall, A., Wilson, C.-A., & Dale, A. (2023). Telecommunications and natural disasters in rural Australia: The role of digital capability in building disaster resilience. Journal of Rural Studies, 100, 102996. https://doi.org/10.1016/j.jrurstud.2023.03.004
+
+Mayo, F. (2025). Clean Power 2030 builds stability by cutting import reliance. https://ember-energy.org/app/uploads/2025/02/Clean-Power-2030-builds-stability-by-cutting-import-reliance.pdf
+
+McClelland, B. (2024, April 26). The World’s Greenest Countries 2022. Www.greenmatch.co.uk. https://www.greenmatch.co.uk/blog/greenest-countries
+
+Minerals Council of Australia. (2019). Hard Facts COAL Hard Facts COAL Contents. https://whitehavencoal.com.au/wp-content/uploads/2019/07/coal-hard-facts-minerals-council-australia.pdf
+
+Nowtricity. (2024). CO2 emissions per kWh in Sweden - Nowtricity. Www.nowtricity.com. https://www.nowtricity.com/country/sweden/
+
+Ed Lessons: Extension Topics 2 - 9
+
+## Other Resources
+
+Drop-in with Wenjing Chen (16/05/2025) where she suggested that I make the recommendation broader and supply supporting examples.
+
+https://www.minister.industry.gov.au/ministers/pitt/media-releases/coal-continue-help-powering-australian-economy
+
+https://www.aofm.gov.au/sites/default/files/2022-11-28/Aust%20Govt%20CC%20Actions%20Update%20November%202022_1.pdf
+
+https://www.lse.ac.uk/granthaminstitute/explainers/what-is-a-carbon-price-and-why-do-we-need-one/
+
+https://ggrepel.slowkow.com/
+
+https://stackoverflow.com/questions/10156417/subscripts-in-plots-in-r
+
+https://quarto.org/docs/output-formats/html-themes.html
+
+https://quarto.org/docs/authoring/markdown-basics.html
+
+https://www.w3schools.com/tags/tag_sub.asp
